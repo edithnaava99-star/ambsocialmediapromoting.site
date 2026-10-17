@@ -1,0 +1,12 @@
+{
+  "name": "ambsocialmediapromoting-site",
+  "version": "1.0.0",
+  "description": "Simple ecommerce website starter",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
