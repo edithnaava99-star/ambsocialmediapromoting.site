@@ -5,6 +5,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Serve static frontend from /public
+app.use(express.static('public'));
+
 const PORT = process.env.PORT || 3000;
 
 // Product packages (prices in USD to accept international cards reliably)
@@ -105,10 +108,7 @@ app.post('/api/payments/verify', async (req, res) => {
     if (transactionId) {
       endpoint = `https://api.flutterwave.com/v3/transactions/${transactionId}/verify`;
     } else {
-      // If tx_ref provided, use the transactions endpoint that supports tx_ref filtering
-      // Flutterwave doesn't document a standard /verify by tx_ref GET, so we try transactions/verify-by-reference if available
-      // Fallback: call transactions endpoint and let client provide transactionId instead when possible
-      endpoint = `https://api.flutterwave.com/v3/transactions/verify_by_tx_ref?tx_ref=${encodeURIComponent(tx_ref)}`; // may not exist for all accounts
+      endpoint = `https://api.flutterwave.com/v3/transactions/verify_by_tx_ref?tx_ref=${encodeURIComponent(tx_ref)}`;
     }
 
     const response = await fetch(endpoint, {
@@ -140,15 +140,76 @@ app.post('/api/payments/verify', async (req, res) => {
   }
 });
 
+// Checkout route for frontend cart
+app.post('/api/checkout', async (req, res) => {
+  try {
+    const { cart, customerName, customerEmail, currency } = req.body;
+    if (!cart || !Array.isArray(cart) || cart.length === 0) return res.status(400).json({ error: 'Cart is empty' });
+    if (!customerName || !customerEmail) return res.status(400).json({ error: 'Customer name and email are required' });
+
+    // Calculate total
+    let total = 0;
+    // cart items: { id, qty }
+    for (const item of cart) {
+      const p = packages.find(x => x.id === item.id);
+      if (!p) return res.status(400).json({ error: `Invalid product ${item.id}` });
+      total += p.price * (item.qty || 1);
+    }
+
+    const useCurrency = (currency || 'USD').toUpperCase();
+    const tx_ref = `amb_${Date.now()}`;
+
+    const paymentData = {
+      tx_ref,
+      amount: total.toString(),
+      currency: useCurrency,
+      redirect_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment/callback`,
+      payment_options: 'card',
+      customer: {
+        email: customerEmail,
+        phonenumber: '0000000000',
+        name: customerName
+      },
+      customizations: {
+        title: 'AMB Promotion Payment',
+        description: `Order for ${customerName}`
+      }
+    };
+
+    orders.set(tx_ref, { tx_ref, cart, total, currency: useCurrency, customerName, customerEmail, status: 'initiated', createdAt: Date.now() });
+
+    const response = await fetch('https://api.flutterwave.com/v3/payments', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.FLUTTERWAVE_SECRET_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(paymentData)
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+      console.error('Checkout init error', result);
+      return res.status(400).json({ error: result.message || 'Checkout initiation failed', detail: result });
+    }
+
+    const paymentUrl = (result && result.data && (result.data.link || result.data.checkout_url || result.data.url)) || null;
+    return res.json({ ok: true, paymentUrl, tx_ref });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Simple webhook endpoint to receive Flutterwave notifications (logs only).
 app.post('/api/payments/webhook', (req, res) => {
   console.log('Webhook received', { headers: req.headers, body: req.body });
-  // In production: verify signature, update order DB, respond 200
   res.status(200).send('OK');
 });
 
+// Serve index.html for root (static middleware above will serve files automatically)
 app.get('/', (req, res) => {
-  res.send('AMB Social Media Promoting API is running.');
+  res.sendFile(__dirname + '/public/index.html');
 });
 
 app.listen(PORT, () => {
