@@ -1,16 +1,18 @@
 const express = require('express');
-const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'amb-admin-token';
+const APP_URL = (process.env.APP_URL || process.env.SITE_URL || 'https://ambsocialmediapromoting.site').replace(/\/$/, '');
+const WHATSAPP_NUMBER = '256775460880';
 
-app.use(cors());
-app.use(express.json());
-app.use(express.static('public'));
+app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: false }));
+app.use(express.static(path.join(__dirname, 'public')));
 
 const dataDir = path.join(__dirname, 'data');
 const packagesFile = path.join(dataDir, 'packages.json');
@@ -29,23 +31,30 @@ function readJson(filePath, fallback) {
     if (!raw.trim()) return fallback;
     return JSON.parse(raw);
   } catch (error) {
-    console.error(`Failed to read JSON from ${filePath}:`, error.message);
+    console.error(`Failed to read ${filePath}:`, error.message);
     return fallback;
   }
 }
 
 function writeJson(filePath, value) {
+  ensureDataDir();
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
 }
 
 function defaultPackages() {
   return [
-    { id: 'instagram-1k-followers', name: 'Instagram 1k Followers', description: '1,000 Instagram followers', price: 50, currency: 'USD' },
-    { id: 'youtube-watch-hours', name: 'YouTube 1k Watch Hours', description: '1,000 watch hours for YouTube growth', price: 200, currency: 'USD' },
-    { id: 'youtube-subscribers', name: 'YouTube 1k Subscribers', description: '1,000 YouTube subscribers', price: 150, currency: 'USD' },
-    { id: 'youtube-views-likes', name: 'YouTube 1k Views & Likes', description: '1,000 views and likes for a video', price: 30, currency: 'USD' },
-    { id: 'facebook-followers', name: 'Facebook 1k Followers', description: '1,000 Facebook followers', price: 150, currency: 'USD' },
-    { id: 'tiktok-likes-views', name: 'TikTok 1k Likes / 5k Views', description: '1,000 likes and 5,000 views', price: 50, currency: 'USD' }
+    { id: 'instagram-followers-1k', name: 'Instagram Followers 1k', description: '1,000 Instagram followers', price: 60, currency: 'USD' },
+    { id: 'instagram-likes-1k', name: 'Instagram Likes 1k', description: '1,000 Instagram likes', price: 35, currency: 'USD' },
+    { id: 'instagram-views-10k', name: 'Instagram Views 10k', description: '10,000 Instagram views', price: 25, currency: 'USD' },
+    { id: 'tiktok-likes-1k', name: 'TikTok Likes 1k', description: '1,000 TikTok likes', price: 25, currency: 'USD' },
+    { id: 'tiktok-views-10k', name: 'TikTok Views 10k', description: '10,000 TikTok views', price: 30, currency: 'USD' },
+    { id: 'facebook-followers-1k', name: 'Facebook Followers 1k', description: '1,000 Facebook followers', price: 45, currency: 'USD' },
+    { id: 'facebook-video-views-10k', name: 'Facebook Video Views 10k', description: '10,000 Facebook video views', price: 35, currency: 'USD' },
+    { id: 'youtube-subscribers-1k', name: 'YouTube Subscribers 1k', description: '1,000 YouTube subscribers', price: 70, currency: 'USD' },
+    { id: 'youtube-views-10k', name: 'YouTube Views 10k', description: '10,000 YouTube views', price: 40, currency: 'USD' },
+    { id: 'music-promotion', name: 'Music Promotion', description: 'Song promotion and viral music reach support', price: 50, currency: 'USD' },
+    { id: 'business-ad-boost', name: 'Business Ad Boost', description: 'Business promotion and ad visibility boost', price: 100, currency: 'USD' },
+    { id: 'livestream-views-10k', name: 'Livestream Views 10k', description: '10,000 livestream views', price: 35, currency: 'USD' }
   ];
 }
 
@@ -68,19 +77,12 @@ function saveOrders(orders) {
   writeJson(ordersFile, orders);
 }
 
-function savePackages(packages) {
-  ensureDataDir();
-  writeJson(packagesFile, packages);
-}
-
 function getTotalFromCart(cartItems) {
   const packages = loadPackages();
   return cartItems.reduce((sum, item) => {
     const product = packages.find((p) => p.id === item.id);
-    if (!product) {
-      return sum;
-    }
-    return sum + product.price * (item.qty || 1);
+    if (!product) return sum;
+    return sum + Number(product.price) * (Number(item.qty) || 1);
   }, 0);
 }
 
@@ -93,7 +95,7 @@ function authAdmin(req, res, next) {
 }
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, service: 'AMB Social Media Promoting' });
 });
 
 app.get('/api/packages', (req, res) => {
@@ -119,8 +121,7 @@ app.post('/api/admin/packages', authAdmin, (req, res) => {
   }
 
   const packages = loadPackages();
-  const exists = packages.some((p) => p.id === id);
-  if (exists) {
+  if (packages.some((p) => p.id === id)) {
     return res.status(400).json({ error: 'A product with this id already exists.' });
   }
 
@@ -133,7 +134,7 @@ app.post('/api/admin/packages', authAdmin, (req, res) => {
   };
 
   packages.push(item);
-  savePackages(packages);
+  writeJson(packagesFile, packages);
   res.json({ ok: true, package: item });
 });
 
@@ -151,7 +152,7 @@ app.put('/api/admin/packages/:id', authAdmin, (req, res) => {
   if (price !== undefined) item.price = Number(price);
   if (currency) item.currency = currency.toUpperCase();
 
-  savePackages(packages);
+  writeJson(packagesFile, packages);
   res.json({ ok: true, package: item });
 });
 
@@ -163,7 +164,7 @@ app.delete('/api/admin/packages/:id', authAdmin, (req, res) => {
     return res.status(404).json({ error: 'Package not found.' });
   }
 
-  savePackages(filtered);
+  writeJson(packagesFile, filtered);
   res.json({ ok: true, deletedId: id });
 });
 
@@ -186,13 +187,14 @@ app.get('/api/admin/stats', authAdmin, (req, res) => {
 
 app.post('/api/checkout', async (req, res) => {
   try {
-    const { cart, customerName, customerEmail, currency } = req.body || {};
+    const { cart, customerName, customerEmail, customerPhone, targetUrl, notes } = req.body || {};
 
     if (!Array.isArray(cart) || cart.length === 0) {
-      return res.status(400).json({ error: 'Cart is empty.' });
+      return res.status(400).json({ error: 'Your cart is empty.' });
     }
+
     if (!customerName || !customerEmail) {
-      return res.status(400).json({ error: 'Customer name and email are required.' });
+      return res.status(400).json({ error: 'Name and email are required.' });
     }
 
     const packages = loadPackages();
@@ -206,126 +208,132 @@ app.post('/api/checkout', async (req, res) => {
       return res.status(400).json({ error: 'Total must be greater than zero.' });
     }
 
-    const tx_ref = `amb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const amount = Number(total).toFixed(2);
-    const useCurrency = (currency || 'USD').toUpperCase();
-
-    const paymentData = {
-      tx_ref,
-      amount,
-      currency: useCurrency,
-      redirect_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment/callback`,
-      payment_options: 'card',
-      customer: {
-        email: customerEmail,
-        phonenumber: '0000000000',
-        name: customerName
-      },
-      customizations: {
-        title: 'AMB Promotion Payment',
-        description: `Order for ${customerName}`
-      }
-    };
-
-    const existingOrders = loadOrders();
-    const newOrder = {
-      tx_ref,
-      customerName,
-      customerEmail,
+    const txRef = `AMB_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const order = {
+      id: crypto.randomUUID(),
+      tx_ref: txRef,
+      customerName: String(customerName).trim(),
+      customerEmail: String(customerEmail).trim(),
+      customerPhone: customerPhone ? String(customerPhone).trim() : '',
+      targetUrl: targetUrl ? String(targetUrl).trim() : '',
+      notes: notes ? String(notes).trim() : '',
       items: cart,
-      total: Number(amount),
-      currency: useCurrency,
+      total: Number(total),
+      currency: 'USD',
       status: 'initiated',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      paymentUrl: ''
     };
 
-    existingOrders.push(newOrder);
-    saveOrders(existingOrders);
+    const existing = loadOrders();
+    existing.unshift(order);
+    saveOrders(existing);
 
-    const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
-    if (!secretKey) {
-      return res.status(500).json({ error: 'Flutterwave secret key is not configured.' });
+    const flutterwaveKey = process.env.FLUTTERWAVE_SECRET_KEY;
+    if (flutterwaveKey) {
+      try {
+        const response = await fetch('https://api.flutterwave.com/v3/payments', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${flutterwaveKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            tx_ref: txRef,
+            amount: Number(total).toFixed(2),
+            currency: 'USD',
+            redirect_url: `${APP_URL}/payment/callback`,
+            payment_options: 'card',
+            customer: {
+              email: order.customerEmail,
+              phonenumber: order.customerPhone || '0000000000',
+              name: order.customerName
+            },
+            customizations: {
+              title: 'AMB Social Media Promoting',
+              description: 'Social media growth services'
+            }
+          })
+        });
+
+        const data = await response.json();
+        if (response.ok && data?.data?.link) {
+          const updated = loadOrders();
+          const idx = updated.findIndex((entry) => entry.tx_ref === txRef);
+          if (idx >= 0) {
+            updated[idx].paymentUrl = data.data.link;
+            saveOrders(updated);
+          }
+          return res.json({ ok: true, paymentUrl: data.data.link, tx_ref: txRef, orderId: order.id });
+        }
+      } catch (paymentError) {
+        console.error('Flutterwave checkout failed:', paymentError.message);
+      }
     }
 
-    const response = await fetch('https://api.flutterwave.com/v3/payments', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${secretKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(paymentData)
-    });
+    const whatsappLink = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
+      `Hello AMB Social Media Promoting, I want to order: ${cart.map((p) => `${p.name} x${p.qty}`).join(', ')}. Total: $${Number(total).toFixed(2)}.`
+    )}`;
 
-    const result = await response.json();
-
-    if (!response.ok) {
-      console.error('Flutterwave init error:', result);
-      return res.status(400).json({ error: result.message || 'Checkout initiation failed', detail: result });
+    const updated = loadOrders();
+    const idx = updated.findIndex((entry) => entry.tx_ref === txRef);
+    if (idx >= 0) {
+      updated[idx].paymentUrl = whatsappLink;
+      updated[idx].status = 'pending-whatsapp';
+      saveOrders(updated);
     }
 
-    const paymentUrl = (result && result.data && (result.data.link || result.data.checkout_url || result.data.url)) || null;
-
-    const orders = loadOrders();
-    const index = orders.findIndex((order) => order.tx_ref === tx_ref);
-    if (index >= 0) {
-      orders[index].paymentUrl = paymentUrl;
-      saveOrders(orders);
-    }
-
-    return res.json({ ok: true, paymentUrl, tx_ref });
-  } catch (err) {
-    console.error('Checkout error:', err);
-    return res.status(500).json({ error: 'Server error while creating payment.' });
+    return res.json({ ok: true, paymentUrl: whatsappLink, tx_ref: txRef, orderId: order.id, fallback: true });
+  } catch (error) {
+    console.error('Checkout error:', error.message);
+    return res.status(500).json({ error: 'Unable to create your order right now.' });
   }
 });
 
 app.post('/api/payments/verify', async (req, res) => {
   try {
-    const { transactionId, tx_ref } = req.body || {};
-    if (!transactionId && !tx_ref) {
-      return res.status(400).json({ error: 'transactionId or tx_ref are required.' });
+    const { tx_ref, transactionId } = req.body || {};
+    if (!tx_ref && !transactionId) {
+      return res.status(400).json({ error: 'tx_ref or transactionId required.' });
     }
-
     const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
     if (!secretKey) {
-      return res.status(500).json({ error: 'Flutterwave secret key is not configured.' });
+      return res.status(400).json({ error: 'Flutterwave secret key is not configured.' });
     }
 
     const endpoint = transactionId
-      ? `https://api.flutterwave.com/v3/transactions/${transactionId}/verify`
+      ? `https://api.flutterwave.com/v3/transactions/${encodeURIComponent(transactionId)}/verify`
       : `https://api.flutterwave.com/v3/transactions/verify_by_tx_ref?tx_ref=${encodeURIComponent(tx_ref)}`;
 
     const response = await fetch(endpoint, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${secretKey}`
-      }
+      headers: { Authorization: `Bearer ${secretKey}` }
     });
 
-    const result = await response.json();
-    if (!response.ok) {
-      return res.status(400).json({ error: result.message || 'Verification failed', detail: result });
+    const data = await response.json();
+    if (!response.ok || !data?.data) {
+      return res.status(400).json({ error: data?.message || 'Payment verification failed.' });
     }
 
     const orders = loadOrders();
-    const actualTxRef = (result && result.data && result.data.tx_ref) || tx_ref;
-    const orderIndex = orders.findIndex((o) => o.tx_ref === actualTxRef);
-    if (orderIndex >= 0) {
-      orders[orderIndex].status = result.data && result.data.status ? result.data.status : 'paid';
-      orders[orderIndex].flutterwave = result.data;
+    const order = orders.find((entry) => entry.tx_ref === (data.data.tx_ref || tx_ref));
+    if (order) {
+      order.status = data.data.status === 'successful' ? 'paid' : 'pending';
+      order.flutterwave = data.data;
       saveOrders(orders);
     }
 
-    return res.json({ ok: true, payment: result.data });
+    return res.json({ ok: true, data: data.data });
   } catch (error) {
-    console.error('Verification error:', error);
-    return res.status(500).json({ error: 'Server error while verifying payment.' });
+    console.error('Verify payment failed:', error.message);
+    return res.status(500).json({ error: 'Could not verify payment.' });
   }
 });
 
-app.post('/api/payments/webhook', (req, res) => {
-  console.log('Flutterwave webhook received:', req.body);
-  res.status(200).send('OK');
+app.get('/payment/callback', (req, res) => {
+  const status = req.query.status || 'pending';
+  const txRef = req.query.tx_ref || '';
+  const paymentStatus = status === 'successful' ? 'Payment successful' : 'Payment is still being processed';
+  res.sendFile(path.join(__dirname, 'public', 'payment-callback.html'));
 });
 
 app.get('/admin', (req, res) => {
@@ -333,5 +341,8 @@ app.get('/admin', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`AMB server running on port ${PORT}`);
+  console.log(`AMB Social Media Promoting server listening on port ${PORT}`);
 });
+
+module.exports = app;
+

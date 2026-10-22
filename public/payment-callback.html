@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AMB Payment Status</title>
+    <style>
+      body {
+        font-family: Arial, Helvetica, sans-serif;
+        background: #f5f7fb;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+      }
+      .card {
+        max-width: 640px;
+        background: #fff;
+        border-radius: 18px;
+        padding: 28px;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+        text-align: center;
+      }
+      h1 { margin-top: 0; }
+      p { color: #4b5563; }
+      .button {
+        display: inline-block;
+        margin-top: 10px;
+        padding: 12px 18px;
+        background: #f97316;
+        color: #fff;
+        border-radius: 999px;
+        text-decoration: none;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Payment status</h1>
+      <p id="statusText">Your payment is being processed.</p>
+      <a class="button" href="/">Return home</a>
+    </div>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const status = params.get('status');
+      const txRef = params.get('tx_ref');
+      const el = document.getElementById('statusText');
+      if (status === 'successful') {
+        el.textContent = 'Payment successful. Your order has been confirmed.';
+      } else if (txRef) {
+        el.textContent = 'Your payment is still being verified. Please contact AMB support on WhatsApp if needed.';
+      } else {
+        el.textContent = 'We could not verify your payment yet. Please contact AMB support on WhatsApp.';
+      }
+    </script>
+  </body>
+</html>
+
